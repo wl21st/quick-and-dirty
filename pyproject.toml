@@ -1,0 +1,35 @@
+[project]
+name = "weather-cli"
+version = "0.1.0"
+description = "CLI weather tool with auto-detection based on IP geolocation"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Developer"}
+]
+dependencies = []
+
+[project.scripts]
+weather = "weather_cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/weather_cli"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.4.0",
+    "pytest>=7.0",
+]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+
+[tool.ruff.format]
+quote-style = "double"
