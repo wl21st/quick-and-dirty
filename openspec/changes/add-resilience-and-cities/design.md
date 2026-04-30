@@ -113,12 +113,14 @@ Allow per-request overrides via environment variables (rarely needed).
 ### 7. Where to Apply Retries
 
 **Decision**: Create a `retryable()` decorator/wrapper function that takes a callable and retries it. Apply to:
-- `get_weather()` API call (the urllib.urlopen block)
-- `get_city_from_ip()` API call
+- `fetch_weather()` in `weather.py` (the urllib.urlopen block)
+- `detect_city()` in `geolocation.py`
 
-Do NOT wrap argument parsing or city resolution logic—only network I/O.
+Both functions will raise custom exceptions (`WeatherError`, `GeolocationError`) on failure rather than calling `sys.exit()`. The decorator will catch transient exceptions and retry; after exhausting retries it re-raises the last exception for `cli.py` to handle (print + exit).
 
-**Rationale**: Clean separation; easily testable; reusable.
+Do NOT wrap argument parsing or city resolution logic — only network I/O.
+
+**Rationale**: Clean separation; easily testable; reusable. Centralized exit handling in `cli.main()` improves testability of core logic.
 
 ### 8. Visibility into Retries
 
@@ -129,6 +131,47 @@ Weather request failed (Timeout), retrying in 2s... (1/3)
 On final failure, print error as before.
 
 **Rationale**: Users understand what's happening; not silent.
+
+### 9. Module Architecture — Full Package Split
+
+**Decision**: Refactor from single-file monolith into a multi-module package with clear separation of concerns:
+
+```
+src/weather_cli/
+├── __init__.py      # package marker (minimal)
+├── cli.py           # main(), argparse, orchestration, exit handling
+├── weather.py       # fetch_weather(city) → WeatherData; display_weather(data, city)
+├── geolocation.py   # detect_city() → str | None
+├── retry.py         # @retryable decorator (custom, stdlib only)
+├── config.py        # load_config(), save_config(), get_retry_config(), get_favorites_path(), global settings
+├── favorites.py     # load/save/add/remove/pick
+├── exceptions.py    # WeatherError, GeolocationError, ConfigError (base WeatherCLIError)
+└── types.py         # TypedDicts and type aliases (WeatherData, CityName)
+```
+
+Each module ≤ 80 lines. Dependencies flow inward: `cli` → (`weather`, `geolocation`, `favorites`, `config`); `weather`/`geolocation` → `retry`; `retry` → (optional lazy `config`); `favorites` → `config`; `config` → `exceptions`.
+
+**Rationale**:
+- Testability: Each module can be unit-tested in isolation (mock network, filesystem, input)
+- Single responsibility: Each file has one clear purpose
+- Maintainability: Easier to locate and modify behavior
+- Aligns with design's explicit instruction to "Create config.py module", "Create retry.py module"
+
+**Alternatives considered**:
+- Monolith + helpers (`retry.py`, `config.py` only): Keeps weather/geolocation in `__init__.py`; lower initial churn but poor cohesion, harder to test
+- Sub-packages: Overkill for ~400 total lines
+
+**Implementation approach**:
+1. Create `exceptions.py` and `types.py` (no dependencies)
+2. Create `weather.py`: move `fetch_weather` (network + error → raise `WeatherError`) and `display_weather` (printing)
+3. Create `geolocation.py`: move `detect_city` (raise `GeolocationError` on failure)
+4. Create `retry.py`: custom decorator with exponential backoff + jitter
+5. Create `config.py`: XDG directory resolution, atomic JSON load/save, global `settings` object
+6. Create `favorites.py`: CRUD + interactive `pick_favorite()`
+7. Rename `__init__.py` → `cli.py`: host `main()`, wire everything together, centralized `try/except` → `sys.exit(1)`
+8. Update `pyproject.toml` if needed (no new runtime deps)
+
+**Error handling shift**: Functions in `weather.py` and `geolocation.py` raise exceptions instead of calling `sys.exit()`. `cli.py` is the only module that exits.
 
 ## Risks / Trade-offs
 
